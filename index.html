@@ -172,17 +172,17 @@ function Mqtt(url){
     let settled=false;const ok=v=>{if(!settled){settled=true;res(v)}},bad=e=>{if(!settled){settled=true;rej(e)}};
     try{ws=new WebSocket(url,"mqtt")}catch(e){bad(e);return}
     ws.binaryType="arraybuffer";
-    const to=setTimeout(()=>{bad(new Error("timeout"));try{ws.close()}catch(e){}},7000);
+    const to=setTimeout(()=>{bad(new Error("javob yo‘q (7 s)"));try{ws.close()}catch(e){}},7000);
     ws.onopen=()=>{const id="jv"+Math.random().toString(36).slice(2,12);
       try{ws.send(pkt(0x10,cat(str("MQTT"),new Uint8Array([4,2,0,30]),str(id))))}catch(e){bad(e)}};
     ws.onmessage=e=>{const a=new Uint8Array(e.data);buf=cat(buf,a);parse()};
-    const closed=()=>{clearTimeout(to);clearInterval(ping);const was=self.open;self.open=false;bad(new Error("closed"));
+    const closed=ev=>{clearTimeout(to);clearInterval(ping);const was=self.open;self.open=false;bad(new Error(ev&&ev.code?"yopildi ("+ev.code+")":"ulanib bo‘lmadi"));
       if(was&&self.onclose){const f=self.onclose;self.onclose=null;f()}};
     ws.onclose=closed;ws.onerror=closed;
     function parse(){for(;;){if(buf.length<2)return;let mul=1,len=0,i=1,d;
       do{if(i>=buf.length)return;d=buf[i++];len+=(d&127)*mul;mul*=128}while(d&128);
       if(buf.length<i+len)return;const hdr=buf[0],type=hdr>>4,body=buf.slice(i,i+len);buf=buf.slice(i+len);
-      if(type===2){clearTimeout(to);if(body[1]===0){self.open=true;ping=setInterval(()=>{try{ws.send(new Uint8Array([0xC0,0]))}catch(e){}},20000);ok(self)}else{bad(new Error("refused"));try{ws.close()}catch(e){}}}
+      if(type===2){clearTimeout(to);if(body[1]===0){self.open=true;ping=setInterval(()=>{try{ws.send(new Uint8Array([0xC0,0]))}catch(e){}},20000);ok(self)}else{bad(new Error("rad etildi"));try{ws.close()}catch(e){}}}
       else if(type===3){const tl=(body[0]<<8)|body[1],topic=td.decode(body.subarray(2,2+tl));let off=2+tl;if((hdr>>1)&3)off+=2;
         let msg=null;try{msg=JSON.parse(td.decode(body.subarray(off)))}catch(e){}
         if(msg&&typeof msg==="object"&&self.onmsg){try{self.onmsg(topic,msg)}catch(e){console.error(e)}}}
@@ -193,7 +193,7 @@ function Mqtt(url){
   self.close=()=>{self.onclose=null;self.open=false;clearInterval(ping);try{ws.close()}catch(e){}};
   return self;
 }
-const BROKERS=window.__BROKERS||["wss://broker.emqx.io:8084/mqtt","wss://broker.hivemq.com:8884/mqtt","wss://mqtt.eclipseprojects.io/mqtt","wss://test.mosquitto.org:8081/mqtt"];
+const BROKERS=window.__BROKERS||["wss://broker.emqx.io:8084/mqtt","wss://broker.hivemq.com:8884/mqtt","wss://mqtt.eclipseprojects.io/mqtt","wss://test.mosquitto.org:8081/mqtt","wss://broker-cn.emqx.io:8084/mqtt","wss://broker.mqttdashboard.com:8884/mqtt"];
 const ROOT="fjsti-jarohat-v2/";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 </script>
@@ -360,7 +360,7 @@ async function reattach(url){
 async function hostCreate(){
   beep(520,.08);waitScreen("O‘yin yaratilmoqda…","Serverlarga ulanmoqda, bir necha soniya kuting");
   const links=await connectAll();
-  if(!links.length){renderHome("O‘yin serverlariga ulanib bo‘lmadi. Internetni tekshiring yoki boshqa tarmoq (Wi-Fi / mobil internet) bilan qayta urinib ko‘ring.");return}
+  if(!links.length){renderDiag();return}
   try{navigator.wakeLock&&navigator.wakeLock.request("screen").catch(()=>{})}catch(e){}
   window.addEventListener("beforeunload",e=>{if(H.players.size){e.preventDefault();e.returnValue=""}});
   for(let n=0;n<5;n++){
@@ -373,6 +373,27 @@ async function hostCreate(){
   }
   setInterval(()=>{const n=online().length;if(n!==H.lastOnline){H.lastOnline=n;refreshHost()}},2000);
   hostLobby();
+}
+
+async function renderDiag(){
+  app.innerHTML=`<div class="screen"><div class="center" style="max-width:44rem;margin:auto;align-items:stretch;text-align:left">
+    <h2 style="font-size:1.8rem">Serverlarga ulanib bo‘lmadi</h2>
+    <p class="muted" style="margin:0">Tekshiruv natijasi — bu ekranni rasmga olib yuboring:</p>
+    <ol class="board" id="dg" style="width:100%"></ol>
+    <p class="muted" id="dgtip" style="margin:0"></p>
+    <div class="row"><button class="big" id="retry" type="button">Qayta urinish</button></div></div></div>`;
+  $("#retry").onclick=hostCreate;
+  const tests=[["Internet (google)",async()=>{await fetch("https://www.google.com/generate_204",{mode:"no-cors",cache:"no-store"});return "bor"}],
+    ["WebSocket (echo)",()=>new Promise((res,rej)=>{let w;try{w=new WebSocket("wss://echo.websocket.org")}catch(e){rej(e);return}
+      const t=setTimeout(()=>{rej(new Error("javob yo‘q"));try{w.close()}catch(e){}},7000);
+      w.onopen=()=>{clearTimeout(t);w.close();res("ishlaydi")};w.onerror=()=>{clearTimeout(t);rej(new Error("bloklangan"))}})]]
+    .concat(BROKERS.map(u=>[u.replace(/^wss:\/\//,"").replace(/\/mqtt$/,""),async()=>{const l=await Mqtt(u).connect();l.close();return "ishlaydi"}]));
+  const ul=$("#dg");let okWs=0,okNet=false;
+  ul.innerHTML=tests.map((t,i)=>`<li><b id="dgi${i}">…</b><span>${esc(t[0])}</span><b id="dgr${i}" class="muted" style="font-weight:500">tekshirilmoqda</b></li>`).join("");
+  await Promise.all(tests.map(async(t,i)=>{const t0=performance.now();
+    try{const r=await t[1]();$("#dgi"+i).textContent="✓";$("#dgi"+i).style.color="var(--ok)";$("#dgr"+i).textContent=r+" · "+Math.round(performance.now()-t0)+" ms";if(i===0)okNet=true;if(i===1)okWs++}
+    catch(e){$("#dgi"+i).textContent="✗";$("#dgi"+i).style.color="var(--bad)";$("#dgr"+i).textContent=(e&&e.message)||"xato"}}));
+  $("#dgtip").textContent=!okNet?"Kompyuterda internet yo‘q ko‘rinadi.":okWs?"Internet bor, lekin o‘yin serverlari bu tarmoqda yopiq. Telefoningizdagi mobil internetni (hotspot) yoqib, kompyuterni shunga ulab qayta urining.":"Bu tarmoq yoki brauzer WebSocket ulanishlarini to‘sib qo‘ygan. Boshqa brauzer (Chrome) yoki boshqa internet (mobil hotspot) bilan urinib ko‘ring. Antivirus «veb himoya» funksiyasi ham to‘sishi mumkin.";
 }
 function hostData(link,d){
   if(!d||typeof d!=="object")return;
